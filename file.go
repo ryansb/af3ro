@@ -28,13 +28,17 @@ import (
 
 type S3File struct {
 	sourceKey     string
-	bucket        *s3.Bucket
+	bucket        s3.Bucket
 	key           *s3.Key
 	contentBuffer *bytes.Buffer
 }
 
 func (s S3File) Close() error {
 	// can't close the cloud
+	s.contentBuffer.Truncate(-1)
+	s.bucket = s3.Bucket{}
+	s.key = nil
+	s.sourceKey = ""
 	return nil
 }
 
@@ -93,11 +97,17 @@ func (s S3File) WriteString(p string) (n int, e error) {
 }
 
 func (s S3File) Stat() (os.FileInfo, error) {
-	return nil, NotImplemented
+	r, err := s.bucket.List(s.sourceKey, "/", "", 1)
+	if err != nil {
+		return nil, err
+	}
+	s.key = &r.Contents[0]
+	return S3FileInfo{&s}, nil
 }
 
 func (s S3File) Truncate(size int64) error {
-	return NotImplemented
+	_, err := s.Write([]byte(""))
+	return err
 }
 
 var _ afero.File = new(S3File)

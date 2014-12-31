@@ -38,7 +38,7 @@ type S3Fs struct {
 // error, if any happens.
 func (s S3Fs) Create(name string) (afero.File, error) {
 	k, err := keyIfExists(s.bucket(), name)
-	return S3File{name, s.bucket(), k, nil}, err
+	return S3File{name, *s.bucket(), k, nil}, err
 }
 
 // Mkdir creates a directory in the filesystem, return an error if
@@ -54,7 +54,7 @@ func (s S3Fs) MkdirAll(path string, perm os.FileMode) error { return nil }
 // Open opens a file, returning it or an error, if any happens.
 func (s S3Fs) Open(name string) (afero.File, error) {
 	k, err := keyIfExists(s.bucket(), name)
-	return S3File{name, s.bucket(), k, nil}, err
+	return S3File{name, *s.bucket(), k, nil}, err
 }
 
 // OpenFile opens a file using the given flags and the given mode.
