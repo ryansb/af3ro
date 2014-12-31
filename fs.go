@@ -29,33 +29,16 @@ import (
 var _ afero.Fs = new(S3Fs)
 
 type S3Fs struct {
-	sourceS3 *s3.S3
-	bucket   *s3.Bucket
-}
-
-func NewS3Fs(auth aws.Auth, region *aws.Region, bucket string) *S3Fs {
-	if region == nil {
-		region = &aws.USEast
-	}
-	sourceS3 := s3.New(auth, *region)
-	return &S3Fs{
-		sourceS3,
-		sourceS3.Bucket(bucket),
-	}
-}
-
-func S3FsFromBucket(b s3.Bucket) *S3Fs {
-	return &S3Fs{
-		b.S3,
-		&b,
-	}
+	auth       aws.Auth
+	region     aws.Region
+	bucketName string
 }
 
 // Create creates a file in the filesystem, returning the file and an
 // error, if any happens.
 func (s S3Fs) Create(name string) (afero.File, error) {
-	k, err := keyIfExists(s.bucket, name)
-	return S3File{name, s.bucket, k, nil}, err
+	k, err := keyIfExists(s.bucket(), name)
+	return S3File{name, s.bucket(), k, nil}, err
 }
 
 // Mkdir creates a directory in the filesystem, return an error if
@@ -70,8 +53,8 @@ func (s S3Fs) MkdirAll(path string, perm os.FileMode) error { return nil }
 
 // Open opens a file, returning it or an error, if any happens.
 func (s S3Fs) Open(name string) (afero.File, error) {
-	k, err := keyIfExists(s.bucket, name)
-	return S3File{name, s.bucket, k, nil}, err
+	k, err := keyIfExists(s.bucket(), name)
+	return S3File{name, s.bucket(), k, nil}, err
 }
 
 // OpenFile opens a file using the given flags and the given mode.
@@ -83,7 +66,7 @@ func (s S3Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, err
 // Remove removes a file identified by name, returning an error, if any
 // happens.
 func (s S3Fs) Remove(name string) error {
-	return s.bucket.Del(name)
+	return s.bucket().Del(name)
 }
 
 // RemoveAll removes a directory path and all any children it contains. It
@@ -92,7 +75,7 @@ func (s S3Fs) RemoveAll(path string) error {
 	items := &s3.ListResp{IsTruncated: true, NextMarker: ""}
 	toDel := make([]s3.Object, 0)
 	for items.IsTruncated {
-		items, err := s.bucket.List(path, "/", items.NextMarker, 0)
+		items, err := s.bucket().List(path, "/", items.NextMarker, 0)
 		if err != nil {
 			return err
 		}
@@ -102,7 +85,7 @@ func (s S3Fs) RemoveAll(path string) error {
 		}
 	}
 
-	return s.bucket.DelMulti(
+	return s.bucket().DelMulti(
 		s3.Delete{
 			Quiet:   false,
 			Objects: toDel,
@@ -112,7 +95,7 @@ func (s S3Fs) RemoveAll(path string) error {
 
 // Rename renames a file.
 func (s S3Fs) Rename(oldname, newname string) error {
-	_, err := s.bucket.PutCopy(newname, "", s3.CopyOptions{}, oldname)
+	_, err := s.bucket().PutCopy(newname, "", s3.CopyOptions{}, oldname)
 	if err != nil {
 		return err
 	}
