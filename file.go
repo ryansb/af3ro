@@ -18,6 +18,7 @@ package af3ro
 import (
 	"bytes"
 	"crypto/md5"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -35,7 +36,9 @@ type S3File struct {
 
 func (s S3File) Close() error {
 	// can't close the cloud
-	s.contentBuffer.Truncate(-1)
+	if s.contentBuffer != nil {
+		s.contentBuffer.Truncate(-1)
+	}
 	s.bucket = s3.Bucket{}
 	s.key = nil
 	s.sourceKey = ""
@@ -61,18 +64,22 @@ func (s S3File) Read(p []byte) (n int, e error) {
 }
 
 func (s S3File) ReadAt(p []byte, off int64) (n int, err error) {
+	return 0, fmt.Errorf("NOT IMPLEMENTED: ReadAt")
 	return 0, NotImplemented
 }
 
 func (s S3File) Readdir(count int) ([]os.FileInfo, error) {
+	return nil, fmt.Errorf("NOT IMPLEMENTED: Readdir")
 	return nil, NotImplemented
 }
 
 func (s S3File) Readdirnames(n int) ([]string, error) {
+	return nil, fmt.Errorf("NOT IMPLEMENTED: Readdirnames")
 	return nil, NotImplemented
 }
 
 func (s S3File) Seek(offset int64, whence int) (int64, error) {
+	return 0, fmt.Errorf("NOT IMPLEMENTED: Seek")
 	return 0, NotImplemented
 }
 
@@ -85,10 +92,15 @@ func (s S3File) Write(p []byte) (n int, e error) {
 		// pretend like it worked
 		return len(p), nil
 	}
-	return len(p), s.bucket.Put(s.sourceKey, p, "", "", s3.Options{})
+	return len(p), s.bucket.Put(s.sourceKey, p, "", s.acl(), s3.Options{})
+}
+
+func (s S3File) acl() s3.ACL {
+	return s3.Private
 }
 
 func (s S3File) WriteAt(p []byte, off int64) (n int, e error) {
+	return 0, fmt.Errorf("NOT IMPLEMENTED: WriteAt")
 	return 0, NotImplemented
 }
 
@@ -97,11 +109,11 @@ func (s S3File) WriteString(p string) (n int, e error) {
 }
 
 func (s S3File) Stat() (os.FileInfo, error) {
-	r, err := s.bucket.List(s.sourceKey, "/", "", 1)
+	k, err := keyIfExists(&s.bucket, s.sourceKey)
 	if err != nil {
 		return nil, err
 	}
-	s.key = &r.Contents[0]
+	s.key = k
 	return S3FileInfo{&s}, nil
 }
 

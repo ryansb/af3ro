@@ -16,6 +16,7 @@
 package af3ro
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -38,7 +39,10 @@ type S3Fs struct {
 // error, if any happens.
 func (s S3Fs) Create(name string) (afero.File, error) {
 	k, err := keyIfExists(s.bucket(), name)
-	return S3File{name, *s.bucket(), k, nil}, err
+	if err != nil && err != afero.ErrFileNotFound {
+		return nil, err
+	}
+	return &S3File{name, *s.bucket(), k, nil}, nil
 }
 
 // Mkdir creates a directory in the filesystem, return an error if
@@ -95,7 +99,13 @@ func (s S3Fs) RemoveAll(path string) error {
 
 // Rename renames a file.
 func (s S3Fs) Rename(oldname, newname string) error {
-	_, err := s.bucket().PutCopy(newname, "", s3.CopyOptions{}, oldname)
+	_, err := s.bucket().PutCopy(
+		newname,
+		s3.Private,
+		s3.CopyOptions{},
+		// PutCopy requires name in the format bucket/key...
+		s.bucketName+"/"+oldname,
+	)
 	if err != nil {
 		return err
 	}
@@ -105,7 +115,11 @@ func (s S3Fs) Rename(oldname, newname string) error {
 // Stat returns a FileInfo describing the named file, or an error, if any
 // happens.
 func (s S3Fs) Stat(name string) (os.FileInfo, error) {
-	return nil, NotImplemented
+	k, err := keyIfExists(s.bucket(), name)
+	if err != nil {
+		return nil, err
+	}
+	return S3File{name, *s.bucket(), k, nil}.Stat()
 }
 
 // The name of this FileSystem
@@ -113,22 +127,37 @@ func (s S3Fs) Name() string {
 	return "af3ro : S3-backed afero"
 }
 
+func modeToAWSPerm(mode os.FileMode) s3.ACL {
+	switch mode.Perm() {
+	case 0764:
+		return s3.PublicRead
+	case 0774:
+		return s3.PublicRead
+	case 0775:
+		return s3.PublicRead
+	case 0777:
+		return s3.PublicReadWrite
+	}
+	fmt.Println("Unknown file mode", mode)
+	return s3.Private
+}
+
 //Chmod changes the mode of the named file to mode.
 func (s S3Fs) Chmod(name string, mode os.FileMode) error {
 	// haha permissions
-	return NotImplemented
+	return nil
 }
 
 //Chtimes changes the access and modification times of the named file
 func (s S3Fs) Chtimes(name string, atime time.Time, mtime time.Time) error {
+	return fmt.Errorf("NOT IMPLEMENTED: Chtimes")
 	// haha modtimes
 	return NotImplemented
 }
 
 func keyIfExists(bucket *s3.Bucket, name string) (*s3.Key, error) {
-	resp, err := bucket.Head(name, nil)
-	if resp.StatusCode <= 500 || resp.StatusCode >= 400 {
-		// does not exist
+	resp, err := bucket.Head(name, make(map[string][]string))
+	if err != nil && err.Error() == "404 Not Found" {
 		return nil, afero.ErrFileNotFound
 	} else if err != nil {
 		return nil, err
