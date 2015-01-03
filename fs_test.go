@@ -43,6 +43,12 @@ var testDir = "/af3ro_tests"
 var testName = "test.txt"
 var fs = NewS3Fs(Bucket("test.rsb.io"), EnvAuth())
 
+func aclEq(t *testing.T, got, want s3.ACL) {
+	if got != want {
+		t.Errorf("have %#q want %#q", got, want)
+	}
+}
+
 func TestEnvAuth(t *testing.T) {
 	fs := NewS3Fs(Bucket("test.rsb.io"), EnvAuth())
 	_, err := fs.bucket().List("", "", "", 0)
@@ -53,6 +59,30 @@ func TestEnvAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf(fs.Name(), "Failed to create test file:", err)
 	}
+}
+func TestAcls(t *testing.T) {
+	aclEq(t, getACL(0700), s3.Private)
+	aclEq(t, getACL(0701), s3.Private)
+	aclEq(t, getACL(0711), s3.Private)
+	aclEq(t, getACL(0611), s3.Private)
+	aclEq(t, getACL(0000), s3.Private)
+
+	aclEq(t, getACL(0740), s3.BucketOwnerRead)
+	aclEq(t, getACL(0650), s3.BucketOwnerRead)
+	aclEq(t, getACL(0660), s3.BucketOwnerFull)
+	aclEq(t, getACL(0670), s3.BucketOwnerFull)
+
+	aclEq(t, getACL(0004), s3.PublicRead)
+	aclEq(t, getACL(0545), s3.PublicRead)
+
+	aclEq(t, getACL(0744), s3.PublicRead)
+	aclEq(t, getACL(0745), s3.PublicRead)
+	aclEq(t, getACL(0754), s3.PublicRead)
+	aclEq(t, getACL(0775), s3.PublicRead)
+
+	aclEq(t, getACL(0677), s3.PublicReadWrite)
+	aclEq(t, getACL(0776), s3.PublicReadWrite)
+	aclEq(t, getACL(0777), s3.PublicReadWrite)
 }
 
 //Read with length 0 should not return EOF.
@@ -120,7 +150,6 @@ func TestRename(t *testing.T) {
 }
 
 func TestTruncate(t *testing.T) {
-	t.Fatalf("Truncate is unimplemented")
 	f := newFile("TestTruncate", fs, t)
 	defer fs.Remove(f.Name())
 	defer f.Close()
@@ -141,7 +170,6 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestSeek(t *testing.T) {
-	t.Fatalf("Seek is unimplemented")
 	f := newFile("TestSeek", fs, t)
 	defer fs.Remove(f.Name())
 	defer f.Close()
@@ -178,7 +206,6 @@ func TestSeek(t *testing.T) {
 }
 
 func TestReadAt(t *testing.T) {
-	t.Fatalf("ReadAt is unimplemented")
 	f := newFile("TestReadAt", fs, t)
 	defer fs.Remove(f.Name())
 	defer f.Close()
@@ -197,7 +224,6 @@ func TestReadAt(t *testing.T) {
 }
 
 func TestWriteAt(t *testing.T) {
-	t.Fatalf("WriteAt is unimplemented")
 	f := newFile("TestWriteAt", fs, t)
 	defer fs.Remove(f.Name())
 	defer f.Close()
