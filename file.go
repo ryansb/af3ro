@@ -21,105 +21,230 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/goamz/goamz/s3"
 	"github.com/spf13/afero"
 )
 
-type S3File struct {
-	sourceKey     string
-	bucket        s3.Bucket
-	key           *s3.Key
-	contentBuffer *bytes.Buffer
+// Toss a compile error if interface isn't implemented
+var _ afero.File = new(InMemoryFile)
+
+type MemDir interface {
+	Len() int
+	Names() []string
+	Files() []afero.File
+	Add(afero.File)
+	Remove(afero.File)
 }
 
-func (s S3File) Close() error {
-	// can't close the cloud
-	if s.contentBuffer != nil {
-		s.contentBuffer.Truncate(-1)
+type InMemoryFile struct {
+	at      int64
+	name    string
+	data    []byte
+	memDir  MemDir
+	dir     bool
+	closed  bool
+	mode    os.FileMode
+	modtime time.Time
+	bucket  *s3.Bucket
+}
+
+func MemFileCreate(name string, bucket *s3.Bucket) *InMemoryFile {
+	return &InMemoryFile{
+		name:    name,
+		mode:    0640,
+		modtime: time.Now(),
+		bucket:  bucket,
 	}
-	s.bucket = s3.Bucket{}
-	s.key = nil
-	s.sourceKey = ""
+}
+
+func (f *InMemoryFile) Open() error {
+	atomic.StoreInt64(&f.at, 0)
+	f.closed = false
 	return nil
 }
 
-func (s S3File) Name() string {
-	return s.bucket.URL(s.sourceKey)
+func (f *InMemoryFile) Close() (err error) {
+	hasher := md5.New()
+	hasher.Write(f.data)
+	expected := hasher.Sum([]byte{})
+	etag, err := getEtag(f.Name(), f.bucket)
+	if err != nil {
+		fmt.Println("Failure getting file etag", f.Name(), "Error is", err)
+		return err
+	}
+
+	if etag == string(expected) {
+		// the file hasn't actually changed
+		return nil
+	}
+
+	err = f.bucket.Put(
+		f.Name(), f.data,
+		"", // TODO: use content-type
+		getACL(f.mode),
+		s3.Options{},
+	)
+	if err != nil {
+		fmt.Println("Failure writing file etag", f.Name(), "Error is", err)
+	}
+
+	atomic.StoreInt64(&f.at, 0)
+	f.closed = true
+
+	return
 }
 
-func (s S3File) Read(p []byte) (n int, e error) {
-	if s.contentBuffer == nil {
-		s.contentBuffer = new(bytes.Buffer)
-	}
-	rdr, e := s.bucket.GetReader(s.sourceKey)
-	if e != nil {
+func (f *InMemoryFile) Name() string {
+	return f.name
+}
+
+func (f *InMemoryFile) Stat() (os.FileInfo, error) {
+	return &InMemoryFileInfo{f}, nil
+}
+
+func (f *InMemoryFile) Readdir(count int) (res []os.FileInfo, err error) {
+	files := f.memDir.Files()
+	limit := len(files)
+
+	if len(files) == 0 {
 		return
 	}
-	// tee the read to a local buffer so we can read it back and use
-	// it for seeking around
-	tr := io.TeeReader(rdr, s.contentBuffer)
-	return tr.Read(p)
-}
 
-func (s S3File) ReadAt(p []byte, off int64) (n int, err error) {
-	return 0, fmt.Errorf("NOT IMPLEMENTED: ReadAt")
-	return 0, NotImplemented
-}
-
-func (s S3File) Readdir(count int) ([]os.FileInfo, error) {
-	return nil, fmt.Errorf("NOT IMPLEMENTED: Readdir")
-	return nil, NotImplemented
-}
-
-func (s S3File) Readdirnames(n int) ([]string, error) {
-	return nil, fmt.Errorf("NOT IMPLEMENTED: Readdirnames")
-	return nil, NotImplemented
-}
-
-func (s S3File) Seek(offset int64, whence int) (int64, error) {
-	return 0, fmt.Errorf("NOT IMPLEMENTED: Seek")
-	return 0, NotImplemented
-}
-
-func (s S3File) Write(p []byte) (n int, e error) {
-	hasher := md5.New()
-	hasher.Write(p)
-	etag := hasher.Sum([]byte{})
-	if s.key != nil && string(etag) == strings.Replace(s.key.ETag, "\"", "", 0) {
-		// the md5 of the content to be written and the content already in S3 match.
-		// pretend like it worked
-		return len(p), nil
+	if count > 0 {
+		limit = count
 	}
-	return len(p), s.bucket.Put(s.sourceKey, p, "", s.acl(), s3.Options{})
-}
 
-func (s S3File) acl() s3.ACL {
-	return s3.Private
-}
-
-func (s S3File) WriteAt(p []byte, off int64) (n int, e error) {
-	return 0, fmt.Errorf("NOT IMPLEMENTED: WriteAt")
-	return 0, NotImplemented
-}
-
-func (s S3File) WriteString(p string) (n int, e error) {
-	return s.Write([]byte(p))
-}
-
-func (s S3File) Stat() (os.FileInfo, error) {
-	k, err := keyIfExists(&s.bucket, s.sourceKey)
-	if err != nil {
-		return nil, err
+	if len(files) < limit {
+		err = io.EOF
 	}
-	s.key = k
-	return S3FileInfo{&s}, nil
+
+	res = make([]os.FileInfo, f.memDir.Len())
+
+	i := 0
+	for _, file := range f.memDir.Files() {
+		res[i], _ = file.Stat()
+		i++
+	}
+	return res, nil
 }
 
-func (s S3File) Truncate(size int64) error {
-	_, err := s.Write([]byte(""))
-	return err
+func (f *InMemoryFile) Readdirnames(n int) (names []string, err error) {
+	fi, err := f.Readdir(n)
+	names = make([]string, len(fi))
+	for i, f := range fi {
+		names[i] = f.Name()
+	}
+	return names, err
 }
 
-var _ afero.File = new(S3File)
+func (f *InMemoryFile) Read(b []byte) (n int, err error) {
+	if f.closed == true {
+		return 0, afero.ErrFileClosed
+	}
+	if len(f.data) == 0 {
+		f.data, err = f.bucket.Get(f.Name())
+		if err != nil {
+			// failed to get data from s3
+			return 0, err
+		}
+		atomic.StoreInt64(&f.at, 0)
+	}
+	if len(f.data)-int(f.at) >= len(b) {
+		n = len(b)
+	} else {
+		n = len(f.data) - int(f.at)
+		err = io.EOF
+	}
+	copy(b, f.data[f.at:f.at+int64(n)])
+	atomic.AddInt64(&f.at, int64(n))
+	return
+}
+
+func (f *InMemoryFile) ReadAt(b []byte, off int64) (n int, err error) {
+	atomic.StoreInt64(&f.at, off)
+	return f.Read(b)
+}
+
+func (f *InMemoryFile) Truncate(size int64) error {
+	if f.closed == true {
+		return afero.ErrFileClosed
+	}
+	if size < 0 {
+		return afero.ErrOutOfRange
+	}
+	if size > int64(len(f.data)) {
+		diff := size - int64(len(f.data))
+		f.data = append(f.data, bytes.Repeat([]byte{00}, int(diff))...)
+	} else {
+		f.data = f.data[0:size]
+	}
+	return nil
+}
+
+func (f *InMemoryFile) Seek(offset int64, whence int) (int64, error) {
+	if f.closed == true {
+		return 0, afero.ErrFileClosed
+	}
+	switch whence {
+	case 0:
+		atomic.StoreInt64(&f.at, offset)
+	case 1:
+		atomic.AddInt64(&f.at, int64(offset))
+	case 2:
+		atomic.StoreInt64(&f.at, int64(len(f.data))+offset)
+	}
+	return f.at, nil
+}
+
+func (f *InMemoryFile) Write(b []byte) (n int, err error) {
+	n = len(b)
+	cur := atomic.LoadInt64(&f.at)
+	diff := cur - int64(len(f.data))
+	var tail []byte
+	if n+int(cur) < len(f.data) {
+		tail = f.data[n+int(cur):]
+	}
+	if diff > 0 {
+		f.data = append(bytes.Repeat([]byte{00}, int(diff)), b...)
+		f.data = append(f.data, tail...)
+	} else {
+		f.data = append(f.data[:cur], b...)
+		f.data = append(f.data, tail...)
+	}
+
+	atomic.StoreInt64(&f.at, int64(len(f.data)))
+	return
+}
+
+func (f *InMemoryFile) WriteAt(b []byte, off int64) (n int, err error) {
+	atomic.StoreInt64(&f.at, off)
+	return f.Write(b)
+}
+
+func (f *InMemoryFile) WriteString(s string) (ret int, err error) {
+	return f.Write([]byte(s))
+}
+
+func (f *InMemoryFile) Info() *InMemoryFileInfo {
+	return &InMemoryFileInfo{file: f}
+}
+
+type InMemoryFileInfo struct {
+	file *InMemoryFile
+}
+
+// Implements os.FileInfo
+func (s *InMemoryFileInfo) Name() string       { return s.file.Name() }
+func (s *InMemoryFileInfo) Mode() os.FileMode  { return s.file.mode }
+func (s *InMemoryFileInfo) ModTime() time.Time { return s.file.modtime }
+func (s *InMemoryFileInfo) IsDir() bool        { return s.file.dir }
+func (s *InMemoryFileInfo) Sys() interface{}   { return nil }
+func (s *InMemoryFileInfo) Size() int64 {
+	if s.IsDir() {
+		return int64(42)
+	}
+	return int64(len(s.file.data))
+}
