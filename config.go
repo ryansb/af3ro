@@ -22,10 +22,10 @@ import (
 	"github.com/goamz/goamz/s3"
 )
 
-type Option func(*S3Fs)
+type Option func(*MemS3Fs)
 
-func NewS3Fs(options ...Option) *S3Fs {
-	s := new(S3Fs)
+func NewS3Fs(options ...Option) *MemS3Fs {
+	s := new(MemS3Fs)
 
 	Region(aws.USEast)(s) // set default region
 
@@ -35,28 +35,24 @@ func NewS3Fs(options ...Option) *S3Fs {
 	return s
 }
 
-func S3FsFromBucket(b s3.Bucket) *S3Fs {
+func S3FsFromBucket(b s3.Bucket) *MemS3Fs {
 	return NewS3Fs(Bucket(b.Name), Auth(b.Auth), Region(b.Region))
 }
 
-func S3FileFromBucket(n string, b s3.Bucket) *S3File {
-	return &S3File{n, b, nil, nil}
-}
-
 func Auth(auth aws.Auth) Option {
-	return func(s *S3Fs) {
+	return func(s *MemS3Fs) {
 		s.auth = auth
 	}
 }
 
 func Region(region aws.Region) Option {
-	return func(s *S3Fs) {
+	return func(s *MemS3Fs) {
 		s.region = region
 	}
 }
 
 func EnvAuth() Option {
-	return func(s *S3Fs) {
+	return func(s *MemS3Fs) {
 		s.auth, _ = aws.GetAuth("", "", "", time.Time{})
 	}
 }
@@ -64,14 +60,15 @@ func EnvAuth() Option {
 func Bucket(name string) Option {
 	// TODO add a `verify` option to run HEAD on the bucket to ensure
 	// it exists
-	return func(s *S3Fs) {
+	return func(s *MemS3Fs) {
 		s.bucketName = name
 	}
 }
 
-func (s S3Fs) s3() *s3.S3 {
+func (s MemS3Fs) s3() *s3.S3 {
 	return s3.New(s.auth, s.region)
 }
-func (s S3Fs) bucket() *s3.Bucket {
+
+func (s MemS3Fs) bucket() *s3.Bucket {
 	return s.s3().Bucket(s.bucketName)
 }
