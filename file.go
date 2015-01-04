@@ -67,9 +67,12 @@ func (f *InMemoryFile) Open() error {
 }
 
 func (f *InMemoryFile) Close() (err error) {
+	atomic.StoreInt64(&f.at, 0)
+	f.closed = true
+
 	hasher := md5.New()
 	hasher.Write(f.data)
-	expected := hasher.Sum([]byte{})
+	expected := fmt.Sprintf("\"%x\"", hasher.Sum([]byte{}))
 	etag, err := getEtag(f.Name(), f.bucket)
 	if err != nil {
 		fmt.Println("Failure getting file etag", f.Name(), "Error is", err)
@@ -88,11 +91,8 @@ func (f *InMemoryFile) Close() (err error) {
 		s3.Options{},
 	)
 	if err != nil {
-		fmt.Println("Failure writing file etag", f.Name(), "Error is", err)
+		fmt.Println("Failure writing file", f.Name(), "Error is", err)
 	}
-
-	atomic.StoreInt64(&f.at, 0)
-	f.closed = true
 
 	return
 }
