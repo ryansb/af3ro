@@ -3,6 +3,19 @@
 Will check etags when writing a file to avoid writing files that don't need to
 be overwritten (etags are MD5 sums of file contents)
 
+```
+package foo
+
+import (
+    "github.com/goamz/goamz/aws"
+    "github.com/ryansb/af3ro"
+    "github.com/spf13/afero"
+)
+
+
+var s3fs afero.Fs = af3ro.NewS3Fs(af3ro.Bucket("some.bucket.name"), af3ro.Region(aws.USEast), af3ro.EnvAuth())
+```
+
 ## Caveats
 
 Don't use this for big files for these reasons:
