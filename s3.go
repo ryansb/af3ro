@@ -27,7 +27,9 @@ import (
 
 func getEtag(name string, bucket *s3.Bucket) (string, error) {
 	resp, err := headName(name, bucket)
-	if err != nil {
+	if err == afero.ErrFileNotFound {
+		return "", nil
+	} else if err != nil {
 		return "", err
 	}
 	return strings.Replace(
@@ -56,7 +58,7 @@ func headName(name string, bucket *s3.Bucket) (*http.Response, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	return resp, err
+	return resp, nil
 }
 
 type PermU uint
