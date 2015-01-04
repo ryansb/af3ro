@@ -1,4 +1,6 @@
 // Copyright © 2014 Ryan Brown <sb@ryansb.com>
+// Copyright © 2014 Steve Francia <spf@spf13.com>.
+// Copyright © 2013 tsuru authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

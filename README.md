@@ -3,6 +3,8 @@
 Will check etags when writing a file to avoid writing files that don't need to
 be overwritten (etags are MD5 sums of file contents)
 
+For more information about afero see the [github page][afero].
+
 ```
 package foo
 
@@ -37,3 +39,5 @@ correct permissions are set in S3
 Basically, this is for small files where you (for some reason) aren't able to
 use the goamz/s3 library directly and have to present a local-like filesystem
 interface.
+
+[afero]: https://github.com/spf13/afero
