@@ -68,6 +68,10 @@ func (f *InMemoryFile) Open() error {
 	return nil
 }
 
+func (f *InMemoryFile) Sync() error {
+        return nil
+}
+
 func (f *InMemoryFile) Close() (err error) {
 	atomic.StoreInt64(&f.at, 0)
 	f.closed = true
